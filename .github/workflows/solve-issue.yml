@@ -23,42 +23,25 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configure git
-        run: |
-          git config user.name "claude-bot"
-          git config user.email "claude-bot@users.noreply.github.com"
 
       - name: Run Claude Code
-        uses: anthropics/claude-code-base-action@beta
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          ISSUE_TITLE: ${{ github.event.issue.title }}
+        uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_tools: "Bash,Read,Write,Edit,Grep,Glob"
           prompt: |
-            You are running in a GitHub Action with write permissions.
-            GH_TOKEN, GITHUB_TOKEN, ISSUE_NUMBER, ISSUE_TITLE are set.
+            Solve issue #${{ github.event.issue.number }} titled
+            "${{ github.event.issue.title }}".
 
-            Solve issue #$ISSUE_NUMBER ("$ISSUE_TITLE") by executing:
+            Steps:
+            1. Read the issue body with `gh issue view ${{ github.event.issue.number }}`.
+            2. Investigate the codebase.
+            3. Create branch `claude/issue-${{ github.event.issue.number }}`.
+            4. Edit files to fix the issue.
+            5. Commit changes referencing the issue.
+            6. Push the branch.
+            7. Open a PR titled "Fix #${{ github.event.issue.number }}: <short>"
+               with body containing "Closes #${{ github.event.issue.number }}",
+               your summary, and a note that the change is AI-generated.
 
-            1. Run `gh issue view $ISSUE_NUMBER` — read body.
-            2. Investigate codebase with Read/Grep/Glob.
-            3. `git checkout -b claude/issue-$ISSUE_NUMBER`
-            4. Edit/create files to fix the issue.
-            5. `git add -A && git commit -m "Fix #$ISSUE_NUMBER: <one-line summary>"`
-            6. `git push -u origin claude/issue-$ISSUE_NUMBER`
-            7. `gh pr create --title "Fix #$ISSUE_NUMBER: <short>" --body "Closes #$ISSUE_NUMBER
-
-               <summary of changes>
-
-               ⚠️ AI-generated. Review before merging."`
-
-            If the issue is unsolvable or unclear, skip steps 3-7 and run:
-            `gh issue comment $ISSUE_NUMBER --body "🤖 Cannot fix: <reason>"`
-
-            Execute each step. Do not just describe — run the commands.
+            If the issue is unclear or unsolvable, comment on the issue
+            explaining why instead of opening a PR.

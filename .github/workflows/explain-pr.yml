@@ -19,27 +19,18 @@ jobs:
           fetch-depth: 0
 
       - name: Run Claude Code
-        uses: anthropics/claude-code-base-action@beta
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_REF: ${{ github.base_ref }}
+        uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_tools: "Bash,Read,Grep,Glob"
           prompt: |
-            You are running in a GitHub Action.
-            GH_TOKEN, PR_NUMBER, BASE_REF are set.
+            Explain pull request #${{ github.event.pull_request.number }}.
 
-            Execute:
-            1. `git diff origin/$BASE_REF...HEAD` — read the PR diff.
-            2. Compose explanation with sections:
+            Steps:
+            1. Read the diff: `git diff origin/${{ github.base_ref }}...HEAD`.
+            2. Compose an explanation with sections:
                - Summary (2-3 sentences)
                - Key changes (bullets)
-               - Risk areas
+               - Risk areas / things to review carefully
                - Suggested test focus
-            3. Post sticky comment using:
-               `gh pr comment $PR_NUMBER --body "<your explanation>"`
-
-            Execute each step. Do not just describe — run commands.
+            3. Post the explanation as a PR comment:
+               `gh pr comment ${{ github.event.pull_request.number }} --body "<your text>"`.
