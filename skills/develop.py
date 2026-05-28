@@ -1,19 +1,27 @@
-"""Use Claude API to generate code changes from a description, apply, commit."""
+"""Use Claude Code CLI to generate code changes from a description, apply, commit.
+
+Why CLI and not the Anthropic SDK?
+  The repo's only available credential is CLAUDE_CODE_OAUTH_TOKEN, which is
+  the OAuth bearer issued for a Claude Code subscription. That token does
+  not grant access to the Messages API model catalog (returns 404 on most
+  model IDs). The Claude Code CLI is the supported consumer of that token,
+  so we shell out to it in headless mode and parse a strict JSON contract
+  from stdout.
+"""
 from __future__ import annotations
 
 import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional
 
-from anthropic import Anthropic
-
 logger = logging.getLogger(__name__)
 
-MODEL = "claude-sonnet-4-5"
+MODEL = "sonnet"  # Claude Code CLI accepts aliases: sonnet, opus, haiku
 
 SYSTEM_PROMPT = """You are a senior software engineer. You receive an issue description and \
 relevant repository file context. You must propose precise code changes.
@@ -85,54 +93,59 @@ def develop(
 ) -> dict:
     """Generate changes via Claude, apply, optionally commit and push.
 
-    Auth resolution order:
-      1. explicit api_key arg
-      2. ANTHROPIC_API_KEY env (sent as x-api-key)
-      3. explicit auth_token arg
-      4. CLAUDE_CODE_OAUTH_TOKEN env (sent as Authorization: Bearer)
-
-    OAuth-style tokens (prefix 'sk-ant-oat') are routed to auth_token even if
-    passed via api_key / ANTHROPIC_API_KEY, so workflows that only have the
-    Claude Code OAuth token still authenticate correctly.
+    Auth: requires CLAUDE_CODE_OAUTH_TOKEN env (or auth_token arg). The
+    api_key parameter is accepted for backwards compatibility but ignored;
+    Claude Code CLI handles auth itself via the OAuth token.
 
     Returns dict: {"commit_message", "changes", "committed": bool, "pushed": bool}
     """
     if not description.strip():
         raise ValueError("description required")
 
-    resolved_api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-    resolved_auth_token = auth_token or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+    oauth = auth_token or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or api_key
+    if not oauth:
+        raise DevelopError("missing CLAUDE_CODE_OAUTH_TOKEN")
 
-    if resolved_api_key and resolved_api_key.startswith("sk-ant-oat"):
-        resolved_auth_token = resolved_auth_token or resolved_api_key
-        resolved_api_key = None
+    claude_bin = shutil.which("claude")
+    if not claude_bin:
+        raise DevelopError(
+            "claude CLI not found on PATH. Install with: "
+            "npm install -g @anthropic-ai/claude-code"
+        )
 
-    if not resolved_api_key and not resolved_auth_token:
-        raise DevelopError("missing ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN")
-
-    if resolved_api_key:
-        client = Anthropic(api_key=resolved_api_key)
-    else:
-        client = Anthropic(auth_token=resolved_auth_token)
     root = Path(repo_root).resolve()
 
     user_prompt = (
+        f"{SYSTEM_PROMPT}\n\n"
         f"# Task\n{description}\n\n"
         f"# Repository file context\n{file_context}\n"
     )
 
-    logger.info("calling Claude model=%s", model)
-    msg = client.messages.create(
-        model=model,
-        max_tokens=max_tokens,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_prompt}],
-    )
+    cli_env = os.environ.copy()
+    cli_env["CLAUDE_CODE_OAUTH_TOKEN"] = oauth
 
-    text = "".join(
-        block.text for block in msg.content if getattr(block, "type", "") == "text"
+    logger.info("invoking claude CLI model=%s", model)
+    proc = subprocess.run(
+        [
+            claude_bin,
+            "--print",
+            "--model", model,
+            "--permission-mode", "bypassPermissions",
+            user_prompt,
+        ],
+        cwd=str(root),
+        env=cli_env,
+        capture_output=True,
+        text=True,
+        timeout=600,
     )
-    plan = _extract_json(text)
+    if proc.returncode != 0:
+        raise DevelopError(
+            f"claude CLI failed ({proc.returncode}):\n"
+            f"stdout: {proc.stdout[-2000:]}\nstderr: {proc.stderr[-2000:]}"
+        )
+
+    plan = _extract_json(proc.stdout)
 
     commit_message = plan.get("commit_message") or "chore: automated change"
     changes = plan.get("changes") or []
