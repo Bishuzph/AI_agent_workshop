@@ -56,7 +56,7 @@ jobs:
           4. Suggested test focus
           """
 
-          token = os.environ["CLAUDE_CODE_OAUTH_TOKEN"].strip()
+          token = "".join(os.environ["CLAUDE_CODE_OAUTH_TOKEN"].split())
           print(f"Token length: {len(token)}, prefix: {token[:10]}...")
           req = urllib.request.Request(
               "https://api.anthropic.com/v1/messages",
