@@ -1,0 +1,151 @@
+name: Solve Issue
+
+on:
+  issues:
+    types: [opened, labeled]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  solve:
+    if: |
+      (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'claude-solve')) ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/solve'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gather repo context
+        id: ctx
+        run: |
+          {
+            echo 'tree<<EOF'
+            find . -type f \
+              -not -path './.git/*' \
+              -not -path './node_modules/*' \
+              -not -path './.idea/*' \
+              | head -200
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Call Claude
+        id: claude
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          TREE: ${{ steps.ctx.outputs.tree }}
+        run: |
+          python - <<'PY'
+          import json, os, subprocess, urllib.request, re, pathlib
+
+          tree = os.environ["TREE"].splitlines()
+          files = {}
+          for path in tree[:50]:
+              p = path.strip()
+              if not p or not os.path.isfile(p):
+                  continue
+              try:
+                  files[p] = pathlib.Path(p).read_text(errors="replace")[:8000]
+              except Exception:
+                  pass
+
+          file_blob = "\n\n".join(f"=== {p} ===\n{c}" for p, c in files.items())
+
+          prompt = f"""Solve this GitHub issue by editing files in repo.
+
+          Issue #{os.environ['ISSUE_NUMBER']}: {os.environ['ISSUE_TITLE']}
+
+          {os.environ.get('ISSUE_BODY') or '(no body)'}
+
+          Repo files (truncated):
+          {file_blob}
+
+          Reply ONLY with JSON, no prose, no markdown fences:
+          {{
+            "summary": "what you changed and why",
+            "files": [
+              {{"path": "relative/path.ext", "content": "full new file content"}}
+            ]
+          }}
+
+          Rules:
+          - Include FULL file content, not diff.
+          - Only include files you create or modify.
+          - If issue unclear or unsolvable, return empty files array and explain in summary.
+          """
+
+          req = urllib.request.Request(
+              "https://api.anthropic.com/v1/messages",
+              data=json.dumps({
+                  "model": "claude-opus-4-7",
+                  "max_tokens": 8000,
+                  "messages": [{"role": "user", "content": prompt}],
+              }).encode(),
+              headers={
+                  "x-api-key": os.environ["ANTHROPIC_API_KEY"].strip(),
+                  "anthropic-version": "2023-06-01",
+                  "content-type": "application/json",
+              },
+          )
+          resp = json.loads(urllib.request.urlopen(req).read())
+          text = resp["content"][0]["text"].strip()
+          text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.MULTILINE).strip()
+          plan = json.loads(text)
+
+          for f in plan.get("files", []):
+              path = pathlib.Path(f["path"])
+              path.parent.mkdir(parents=True, exist_ok=True)
+              path.write_text(f["content"])
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write("summary<<EOF\n")
+              out.write(plan.get("summary", ""))
+              out.write("\nEOF\n")
+              out.write(f"changed={'yes' if plan.get('files') else 'no'}\n")
+          PY
+
+      - name: Create PR
+        if: steps.claude.outputs.changed == 'yes'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          SUMMARY: ${{ steps.claude.outputs.summary }}
+        run: |
+          BRANCH="claude/issue-${ISSUE_NUMBER}"
+          git config user.name "claude-bot"
+          git config user.email "claude-bot@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add -A
+          git commit -m "Attempt fix for #${ISSUE_NUMBER}
+
+          ${SUMMARY}"
+          git push -u origin "$BRANCH"
+          gh pr create \
+            --title "Fix #${ISSUE_NUMBER}: Claude attempt" \
+            --body "Closes #${ISSUE_NUMBER}
+
+          ${SUMMARY}
+
+          ⚠️ AI-generated. Review carefully before merging." \
+            --head "$BRANCH"
+
+      - name: Comment when no changes
+        if: steps.claude.outputs.changed == 'no'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          SUMMARY: ${{ steps.claude.outputs.summary }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --body "🤖 Claude could not generate fix:
+
+          ${SUMMARY}"
