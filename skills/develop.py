@@ -75,6 +75,7 @@ def develop(
     file_context: str,
     repo_root: str = ".",
     api_key: Optional[str] = None,
+    auth_token: Optional[str] = None,
     model: str = MODEL,
     max_tokens: int = 8000,
     commit: bool = True,
@@ -84,18 +85,35 @@ def develop(
 ) -> dict:
     """Generate changes via Claude, apply, optionally commit and push.
 
+    Auth resolution order:
+      1. explicit api_key arg
+      2. ANTHROPIC_API_KEY env (sent as x-api-key)
+      3. explicit auth_token arg
+      4. CLAUDE_CODE_OAUTH_TOKEN env (sent as Authorization: Bearer)
+
+    OAuth-style tokens (prefix 'sk-ant-oat') are routed to auth_token even if
+    passed via api_key / ANTHROPIC_API_KEY, so workflows that only have the
+    Claude Code OAuth token still authenticate correctly.
+
     Returns dict: {"commit_message", "changes", "committed": bool, "pushed": bool}
     """
     if not description.strip():
         raise ValueError("description required")
 
-    key = api_key or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get(
-        "CLAUDE_CODE_OAUTH_TOKEN"
-    )
-    if not key:
+    resolved_api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+    resolved_auth_token = auth_token or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+
+    if resolved_api_key and resolved_api_key.startswith("sk-ant-oat"):
+        resolved_auth_token = resolved_auth_token or resolved_api_key
+        resolved_api_key = None
+
+    if not resolved_api_key and not resolved_auth_token:
         raise DevelopError("missing ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN")
 
-    client = Anthropic(api_key=key)
+    if resolved_api_key:
+        client = Anthropic(api_key=resolved_api_key)
+    else:
+        client = Anthropic(auth_token=resolved_auth_token)
     root = Path(repo_root).resolve()
 
     user_prompt = (

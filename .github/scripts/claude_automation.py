@@ -48,10 +48,9 @@ def _safe_comment(repo: str, issue: int, token: str, body: str) -> None:
 
 def main() -> int:
     github_token = _env("GITHUB_TOKEN")
-    anthropic_key = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or os.environ.get(
-        "ANTHROPIC_API_KEY", ""
-    )
-    if not anthropic_key:
+    anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    anthropic_oauth = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
+    if not anthropic_api_key and not anthropic_oauth:
         raise RuntimeError("missing CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY")
 
     repo = _env("REPO")  # owner/name
@@ -88,7 +87,8 @@ def main() -> int:
             description=task_text,
             file_context=context,
             repo_root=str(ROOT),
-            api_key=anthropic_key,
+            api_key=anthropic_api_key or None,
+            auth_token=anthropic_oauth or None,
             branch=branch,
             push=True,
         )
