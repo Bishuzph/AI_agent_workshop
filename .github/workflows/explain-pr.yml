@@ -31,7 +31,7 @@ jobs:
       - name: Call Claude
         id: claude
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
           DIFF: ${{ steps.diff.outputs.diff }}
@@ -56,8 +56,8 @@ jobs:
           4. Suggested test focus
           """
 
-          key = os.environ["ANTHROPIC_API_KEY"].strip()
-          print(f"Key length: {len(key)}, prefix: {key[:7]}...")
+          token = os.environ["CLAUDE_CODE_OAUTH_TOKEN"].strip()
+          print(f"Token length: {len(token)}, prefix: {token[:10]}...")
           req = urllib.request.Request(
               "https://api.anthropic.com/v1/messages",
               data=json.dumps({
@@ -66,7 +66,8 @@ jobs:
                   "messages": [{"role": "user", "content": prompt}],
               }).encode(),
               headers={
-                  "x-api-key": key,
+                  "authorization": f"Bearer {token}",
+                  "anthropic-beta": "oauth-2025-04-20",
                   "anthropic-version": "2023-06-01",
                   "content-type": "application/json",
               },
