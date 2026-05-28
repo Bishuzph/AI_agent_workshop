@@ -56,6 +56,8 @@ jobs:
           4. Suggested test focus
           """
 
+          key = os.environ["ANTHROPIC_API_KEY"].strip()
+          print(f"Key length: {len(key)}, prefix: {key[:7]}...")
           req = urllib.request.Request(
               "https://api.anthropic.com/v1/messages",
               data=json.dumps({
@@ -64,12 +66,16 @@ jobs:
                   "messages": [{"role": "user", "content": prompt}],
               }).encode(),
               headers={
-                  "x-api-key": os.environ["ANTHROPIC_API_KEY"].strip(),
+                  "x-api-key": key,
                   "anthropic-version": "2023-06-01",
                   "content-type": "application/json",
               },
           )
-          resp = json.loads(urllib.request.urlopen(req).read())
+          try:
+              resp = json.loads(urllib.request.urlopen(req).read())
+          except urllib.error.HTTPError as e:
+              print("API error body:", e.read().decode())
+              raise
           text = resp["content"][0]["text"]
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write("explanation<<EOF\n")
