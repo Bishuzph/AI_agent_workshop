@@ -64,7 +64,7 @@ jobs:
                   "messages": [{"role": "user", "content": prompt}],
               }).encode(),
               headers={
-                  "x-api-key": os.environ["ANTHROPIC_API_KEY"],
+                  "x-api-key": os.environ["ANTHROPIC_API_KEY"].strip(),
                   "anthropic-version": "2023-06-01",
                   "content-type": "application/json",
               },
