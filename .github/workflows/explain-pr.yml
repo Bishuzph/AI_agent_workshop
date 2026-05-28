@@ -1,0 +1,87 @@
+name: Explain PR
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  explain:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR diff
+        id: diff
+        run: |
+          git diff origin/${{ github.base_ref }}...HEAD > pr.diff
+          {
+            echo 'diff<<EOF'
+            head -c 60000 pr.diff
+            echo
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Call Claude
+        id: claude
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          DIFF: ${{ steps.diff.outputs.diff }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+
+          prompt = f"""Explain this pull request for reviewers.
+
+          Title: {os.environ['PR_TITLE']}
+          Description: {os.environ.get('PR_BODY') or '(none)'}
+
+          Diff:
+          ```
+          {os.environ['DIFF']}
+          ```
+
+          Output sections:
+          1. Summary (2-3 sentences)
+          2. Key changes (bullets)
+          3. Risk areas / things to review carefully
+          4. Suggested test focus
+          """
+
+          req = urllib.request.Request(
+              "https://api.anthropic.com/v1/messages",
+              data=json.dumps({
+                  "model": "claude-opus-4-7",
+                  "max_tokens": 2000,
+                  "messages": [{"role": "user", "content": prompt}],
+              }).encode(),
+              headers={
+                  "x-api-key": os.environ["ANTHROPIC_API_KEY"],
+                  "anthropic-version": "2023-06-01",
+                  "content-type": "application/json",
+              },
+          )
+          resp = json.loads(urllib.request.urlopen(req).read())
+          text = resp["content"][0]["text"]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("explanation<<EOF\n")
+              f.write(text)
+              f.write("\nEOF\n")
+          PY
+
+      - name: Post comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: claude-pr-explainer
+          message: |
+            ## 🤖 PR Explanation
+
+            ${{ steps.claude.outputs.explanation }}
