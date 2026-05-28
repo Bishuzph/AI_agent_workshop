@@ -24,25 +24,37 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Configure git
+        run: |
+          git config user.name "claude-bot"
+          git config user.email "claude-bot@users.noreply.github.com"
+
       - name: Run Claude Code
         uses: anthropics/claude-code-action@beta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           mode: agent
           prompt: |
-            Read GitHub issue #${{ github.event.issue.number }} in this repo
-            (title: "${{ github.event.issue.title }}"). Use `gh issue view` for body.
+            You are running inside a GitHub Action with write permissions
+            and GH_TOKEN already set. You MUST execute the steps below using
+            bash — do not just plan or describe.
 
-            Investigate the codebase, then implement a fix:
-            1. Create branch `claude/issue-${{ github.event.issue.number }}`.
-            2. Edit files to address the issue.
-            3. Commit with message referencing issue.
-            4. Push branch.
-            5. Open PR with `gh pr create` titled "Fix #${{ github.event.issue.number }}: <short>"
-               and body "Closes #${{ github.event.issue.number }}" plus your summary.
-            6. AI-generated warning in PR body.
+            Issue #${{ github.event.issue.number }}: "${{ github.event.issue.title }}"
 
-            If issue is unclear or unsolvable, post comment on issue with
-            `gh issue comment ${{ github.event.issue.number }}` explaining why
-            and skip the PR.
+            Steps (run all):
+            1. `gh issue view ${{ github.event.issue.number }}` to read body.
+            2. Investigate codebase with Read/Grep/Glob.
+            3. `git checkout -b claude/issue-${{ github.event.issue.number }}`
+            4. Edit files to fix issue (Write/Edit tools).
+            5. `git add -A && git commit -m "Fix #${{ github.event.issue.number }}: <summary>"`
+            6. `git push -u origin claude/issue-${{ github.event.issue.number }}`
+            7. `gh pr create --title "Fix #${{ github.event.issue.number }}: <short>" --body "Closes #${{ github.event.issue.number }}\n\n<your summary>\n\n⚠️ AI-generated. Review before merging."`
+
+            If issue unsolvable: skip steps 3-7, instead run
+            `gh issue comment ${{ github.event.issue.number }} --body "🤖 Cannot fix: <reason>"`.
+
+            Confirm at end which path you took.
           allowed_tools: "Bash,Read,Write,Edit,Grep,Glob"
