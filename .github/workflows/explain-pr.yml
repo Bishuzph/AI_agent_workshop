@@ -19,18 +19,27 @@ jobs:
           fetch-depth: 0
 
       - name: Run Claude Code
-        uses: anthropics/claude-code-action@beta
+        uses: anthropics/claude-code-base-action@beta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.base_ref }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          mode: agent
+          allowed_tools: "Bash,Read,Grep,Glob"
           prompt: |
-            Read the diff between origin/${{ github.base_ref }} and HEAD,
-            then post a sticky comment on PR #${{ github.event.pull_request.number }}
-            with sections:
-            1. Summary (2-3 sentences)
-            2. Key changes (bullets)
-            3. Risk areas
-            4. Suggested test focus
+            You are running in a GitHub Action.
+            GH_TOKEN, PR_NUMBER, BASE_REF are set.
 
-            Use `gh pr comment ${{ github.event.pull_request.number }} --body "..."`.
-          allowed_tools: "Bash(git diff:*),Bash(gh pr comment:*),Read,Grep,Glob"
+            Execute:
+            1. `git diff origin/$BASE_REF...HEAD` — read the PR diff.
+            2. Compose explanation with sections:
+               - Summary (2-3 sentences)
+               - Key changes (bullets)
+               - Risk areas
+               - Suggested test focus
+            3. Post sticky comment using:
+               `gh pr comment $PR_NUMBER --body "<your explanation>"`
+
+            Execute each step. Do not just describe — run commands.
