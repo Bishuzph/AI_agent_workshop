@@ -13,7 +13,7 @@ from anthropic import Anthropic
 
 logger = logging.getLogger(__name__)
 
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-5"
 
 SYSTEM_PROMPT = """You are a senior software engineer. You receive an issue description and \
 relevant repository file context. You must propose precise code changes.
