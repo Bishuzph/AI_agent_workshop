@@ -7,6 +7,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  id-token: write
 
 jobs:
   explain:
@@ -17,78 +18,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get PR diff
-        id: diff
-        run: |
-          git diff origin/${{ github.base_ref }}...HEAD > pr.diff
-          {
-            echo 'diff<<EOF'
-            head -c 60000 pr.diff
-            echo
-            echo EOF
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Call Claude
-        id: claude
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-          DIFF: ${{ steps.diff.outputs.diff }}
-        run: |
-          python - <<'PY'
-          import json, os, urllib.request
-
-          prompt = f"""Explain this pull request for reviewers.
-
-          Title: {os.environ['PR_TITLE']}
-          Description: {os.environ.get('PR_BODY') or '(none)'}
-
-          Diff:
-          ```
-          {os.environ['DIFF']}
-          ```
-
-          Output sections:
-          1. Summary (2-3 sentences)
-          2. Key changes (bullets)
-          3. Risk areas / things to review carefully
-          4. Suggested test focus
-          """
-
-          token = "".join(os.environ["CLAUDE_CODE_OAUTH_TOKEN"].split())
-          print(f"Token length: {len(token)}, prefix: {token[:10]}...")
-          req = urllib.request.Request(
-              "https://api.anthropic.com/v1/messages",
-              data=json.dumps({
-                  "model": "claude-opus-4-7",
-                  "max_tokens": 2000,
-                  "messages": [{"role": "user", "content": prompt}],
-              }).encode(),
-              headers={
-                  "authorization": f"Bearer {token}",
-                  "anthropic-beta": "oauth-2025-04-20",
-                  "anthropic-version": "2023-06-01",
-                  "content-type": "application/json",
-              },
-          )
-          try:
-              resp = json.loads(urllib.request.urlopen(req).read())
-          except urllib.error.HTTPError as e:
-              print("API error body:", e.read().decode())
-              raise
-          text = resp["content"][0]["text"]
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write("explanation<<EOF\n")
-              f.write(text)
-              f.write("\nEOF\n")
-          PY
-
-      - name: Post comment
-        uses: marocchino/sticky-pull-request-comment@v2
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@beta
         with:
-          header: claude-pr-explainer
-          message: |
-            ## 🤖 PR Explanation
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          mode: agent
+          prompt: |
+            Read the diff between origin/${{ github.base_ref }} and HEAD,
+            then post a sticky comment on PR #${{ github.event.pull_request.number }}
+            with sections:
+            1. Summary (2-3 sentences)
+            2. Key changes (bullets)
+            3. Risk areas
+            4. Suggested test focus
 
-            ${{ steps.claude.outputs.explanation }}
+            Use `gh pr comment ${{ github.event.pull_request.number }} --body "..."`.
+          allowed_tools: "Bash(git diff:*),Bash(gh pr comment:*),Read,Grep,Glob"
